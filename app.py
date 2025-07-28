@@ -18,7 +18,7 @@ def process_mapping_mode(input_file, mapping_df):
     input_df = pd.read_excel(input_file)
     wb = openpyxl.load_workbook(TEMPLATE_PATH)
     ws_values = wb["Values"]
-    ws_type = wb["Type"]
+    ws_type = wb["Types"]
 
     # Values tab
     for j, col_name in enumerate(input_df.columns, start=1):
@@ -53,7 +53,7 @@ def process_auto_mapping_mode(input_file):
     input_df = pd.read_excel(input_file)
     wb = openpyxl.load_workbook(TEMPLATE_PATH)
     ws_values = wb["Values"]
-    ws_type = wb["Type"]
+    ws_type = wb["Types"]
 
     # Values tab
     for j, col_name in enumerate(input_df.columns, start=1):
