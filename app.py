@@ -21,7 +21,6 @@ CLIENT_SHEET_KEY  = "mappedclientname"
 # ──────────────────────────────────────────────────────────────
 
 
-
 # ╭───────────────── NORMALISERS & HELPERS ─────────────────╮
 def norm(s) -> str:
     """Trim, remove *all* whitespace, lower-case."""
@@ -31,10 +30,7 @@ def norm(s) -> str:
 
 
 def clean_header(header: str) -> str:
-    """
-    Replace every period with a single space and trim the result.
-    'Color.Shade' → 'Color Shade'
-    """
+    """Replace every period with a single space and trim."""
     return header.replace(".", " ").strip()
 
 
@@ -47,18 +43,14 @@ IMAGE_KEYWORDS = {
 
 def is_image_column(col_header_norm: str, series: pd.Series) -> bool:
     """
-    True if either:
-      • header contains an image keyword, OR
-      • ≥30 % of first 20 non-blank values end with an image extension
+    True if either header contains an image keyword OR
+    ≥30 % of first 20 non-blank values look like image files/URLs.
     """
     header_hit = any(k in col_header_norm for k in IMAGE_KEYWORDS)
-
     sample = series.dropna().astype(str).head(20)
-    value_hit_ratio = sample.str.contains(IMAGE_EXT_RE).mean() if not sample.empty else 0.0
-
-    return header_hit or value_hit_ratio >= 0.30
+    ratio  = sample.str.contains(IMAGE_EXT_RE).mean() if not sample.empty else 0.0
+    return header_hit or ratio >= 0.30
 # ╰───────────────────────────────────────────────────────────╯
-
 
 
 @st.cache_data
@@ -86,7 +78,6 @@ def load_mapping():
     return mapping_df, client_names
 
 
-
 def process_file(input_file, mode: str, mapping_df: pd.DataFrame | None = None):
     """Generate the filled template and return it as BytesIO."""
     src_df = pd.read_excel(input_file)
@@ -98,7 +89,7 @@ def process_file(input_file, mode: str, mapping_df: pd.DataFrame | None = None):
             col_key = norm(col)
             matches = mapping_df[mapping_df["__attr_key"] == col_key]
 
-            # keep original column
+            # always keep the original column
             if not matches.empty:
                 row3, row4 = matches.iloc[0][MAND_KEY], matches.iloc[0][TYPE_KEY]
             else:
@@ -136,10 +127,22 @@ def process_file(input_file, mode: str, mapping_df: pd.DataFrame | None = None):
     for j, m in enumerate(columns_meta, start=1):
         header_display = clean_header(m["out"])
 
-        # Values sheet
+        # Values sheet header
         ws_vals.cell(row=1, column=j, value=header_display)
+
+        # VALUE-COPY LOOP with text-forcing for string/image columns
         for i, v in enumerate(src_df[m["src"]].tolist(), start=2):
-            ws_vals.cell(row=i, column=j, value=v)   # type preserved
+            cell = ws_vals.cell(row=i, column=j)
+
+            if pd.isna(v):
+                cell.value = None
+                continue
+
+            if str(m["row4"]).lower() in ("string", "imageurlarray"):
+                cell.value = str(v)
+                cell.number_format = "@"          # treat as Text in Excel
+            else:
+                cell.value = v                     # keep numeric/date types
 
         # Types sheet
         ws_types.cell(row=1, column=j, value=header_display)
