@@ -1,58 +1,114 @@
-def process_mapping_mode(input_file, mapping_df):
-    input_df = pd.read_excel(input_file)
+import streamlit as st
+import pandas as pd
+import openpyxl
+from io import BytesIO
 
-    # Start fresh DataFrame with original input
-    output_df = input_df.copy()
+# ──────────────────────────────────────────────────────────────
+# Adjust these indexes if your mapping sheet layout is different
+CLIENT_COL    = 0    # column A   – client name (e.g. Celio, Zivame)
+INPUT_COL     = 1    # column B   – header exactly as in the user file
+OUTPUT_COL    = 2    # column C   – header you want in the template
+TYPE_ROW3_COL = 3    # column D   – value for row 3 in "Types"
+TYPE_ROW4_COL = 4    # column E   – value for row 4 in "Types"
+# ──────────────────────────────────────────────────────────────
 
-    # Dictionary to hold added (Output Header → (Level, DataType))
-    new_columns = {}
+TEMPLATE_PATH = "sku-template (4).xlsx"
+MAPPING_PATH  = "Mapping - Automation.xlsx"
 
-    for _, row in mapping_df.iterrows():
-        input_col = row[1]  # Input Header
-        output_col = row[2]  # Output Header
-        level = row[3]
-        dtype = row[4]
+@st.cache_data
+def load_mapping():
+    return pd.read_excel(MAPPING_PATH, sheet_name=0)
 
-        if input_col in input_df.columns:
-            # Add output_col ONLY if not already present
-            if output_col not in output_df.columns:
-                output_df[output_col] = input_df[input_col]
-                new_columns[output_col] = (level, dtype)
-            else:
-                # Forcefully duplicate again with _1, _2 if name exists
-                suffix = 1
-                new_name = f"{output_col}_{suffix}"
-                while new_name in output_df.columns:
-                    suffix += 1
-                    new_name = f"{output_col}_{suffix}"
-                output_df[new_name] = input_df[input_col]
-                new_columns[new_name] = (level, dtype)
+def process_file(input_file, mode:str, mapping_df:pd.DataFrame|None=None):
+    """
+    Returns (BytesIO workbook, list_of_clients_used).
 
-    # Prepare Excel workbook
-    wb = openpyxl.Workbook()
-    wb.remove(wb.active)
-    ws_values = wb.create_sheet("Values")
-    ws_type = wb.create_sheet("Types")
+    * Mapping mode → honours every mapping row (→ duplicates, extra columns).
+    * Auto-Mapping → fills Types rows 3-4 automatically.
+    """
+    src_df = pd.read_excel(input_file)
+    columns_meta = []          # will drive both Values & Types sheets
 
-    # Fill Values Sheet
-    for j, col in enumerate(output_df.columns, start=1):
-        ws_values.cell(row=1, column=j, value=col)
-    for i, row in enumerate(output_df.itertuples(index=False), start=2):
-        for j, val in enumerate(row, start=1):
+    if mode == "Mapping" and mapping_df is not None:
+        # 1-to-many mapping (duplicates inserted directly after the source)
+        for col in src_df.columns:
+            matches = mapping_df[mapping_df.iloc[:, INPUT_COL] == col]
+
+            if matches.empty:      # keep unmapped column as-is
+                columns_meta.append({
+                    "src": col, "out": col,
+                    "row3": "Not Found", "row4": "Not Found",
+                    "client": None
+                })
+            else:                  # add one entry per matching mapping row
+                for _, row in matches.iterrows():
+                    columns_meta.append({
+                        "src":  col,
+                        "out":  (row.iloc[OUTPUT_COL] if pd.notna(row.iloc[OUTPUT_COL]) else col),
+                        "row3": row.iloc[TYPE_ROW3_COL],
+                        "row4": row.iloc[TYPE_ROW4_COL],
+                        "client": row.iloc[CLIENT_COL]
+                    })
+    else:   # ─────────────── Auto-Mapping ───────────────
+        for col in src_df.columns:
+            # determine datatype for row 4
+            dtype = "imageurlarray" if "image" in col.lower() else "string"
+            columns_meta.append({
+                "src": col, "out": col,
+                "row3": "mandatory",
+                "row4": dtype,
+                "client": None         # not used in auto-mapping
+            })
+
+    # ─────────── Build the workbook from columns_meta ───────────
+    wb        = openpyxl.load_workbook(TEMPLATE_PATH)
+    ws_values = wb["Values"]
+    ws_types  = wb["Types"]
+
+    # ► Values sheet
+    for j, meta in enumerate(columns_meta, start=1):
+        ws_values.cell(row=1, column=j, value=meta["out"])
+        for i, val in enumerate(src_df[meta["src"]].tolist(), start=2):
             ws_values.cell(row=i, column=j, value=val)
 
-    # Fill Types Sheet
-    for col_idx, col in enumerate(output_df.columns, start=2):
-        ws_type.cell(row=1, column=col_idx, value=col)
-        ws_type.cell(row=2, column=col_idx, value=col)
-        if col in new_columns:
-            ws_type.cell(row=3, column=col_idx, value=new_columns[col][0])  # Level
-            ws_type.cell(row=4, column=col_idx, value=new_columns[col][1])  # DataType
-        else:
-            ws_type.cell(row=3, column=col_idx, value="Not Mapped")
-            ws_type.cell(row=4, column=col_idx, value="string")
+    # ► Types sheet
+    for j, meta in enumerate(columns_meta, start=2):
+        ws_types.cell(row=1, column=j, value=meta["out"])
+        ws_types.cell(row=2, column=j, value=meta["out"])
+        ws_types.cell(row=3, column=j, value=meta["row3"])
+        ws_types.cell(row=4, column=j, value=meta["row4"])
 
-    output = BytesIO()
-    wb.save(output)
-    output.seek(0)
-    return output
+    # collect clients actually used (only meaningful for Mapping mode)
+    clients_used = sorted({m["client"] for m in columns_meta if m["client"]})
+
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    return out, clients_used
+
+
+# ───────────────────────────── Streamlit UI ─────────────────────────────
+st.set_page_config(page_title="SKU Template Automation", layout="wide")
+st.title("📊 SKU Template Automation Tool")
+
+mode        = st.selectbox("Select Mode", ["Mapping", "Auto-Mapping"])
+input_file  = st.file_uploader("Upload Input Excel File", type=["xlsx"])
+
+if input_file:
+    if st.button(f"Generate Output ({mode})"):
+        with st.spinner("Processing…"):
+            mapping_df = load_mapping() if mode == "Mapping" else None
+            result_file, clients = process_file(input_file, mode, mapping_df)
+
+            st.success("✅ Output Generated!")
+            st.download_button(
+                "📥 Download Output",
+                data=result_file,
+                file_name="output_template.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            if mode == "Mapping" and clients:
+                st.info(f"🔖 Mapping applied for: **{', '.join(clients)}**")
+
+st.markdown("---")
+st.caption("Built for Rubick.ai | By Vishnu Sai")
