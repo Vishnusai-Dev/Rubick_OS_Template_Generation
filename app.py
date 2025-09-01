@@ -118,22 +118,19 @@ def process_file(input_file, mode: str, mapping_df: pd.DataFrame | None = None):
         "Orange","Purple","Pink","Grey","Gray","Beige","Maroon","Navy"
     ]
 
-    # Extract Option1/Option2 data
     option1_data = pd.Series(dtype=str)
     option2_data = pd.Series(dtype=str)
 
     for col in src_df.columns:
-        # append all detected size columns
         if "size" in norm(col):
             option1_data = pd.concat([option1_data, src_df[col].astype(str)], ignore_index=True)
-        # append all detected color columns
         if "color" in norm(col) or "colour" in norm(col):
             option2_data = pd.concat([option2_data, src_df[col].astype(str)], ignore_index=True)
 
-    # STRICT MATCH VALIDATION
+    # STRICT MATCH VALIDATION (blank if no match)
     def strict_validate(value, valid_list):
         v = str(value).strip()
-        return v if v in valid_list else "non mandatory"
+        return v if v in valid_list else ""
 
     option1_data = option1_data.apply(lambda x: strict_validate(x, size_values))
     option2_data = option2_data.apply(lambda x: strict_validate(x, color_values))
@@ -183,12 +180,12 @@ def process_file(input_file, mode: str, mapping_df: pd.DataFrame | None = None):
 
     ws_types.cell(row=1, column=t1_col, value="Option 1")
     ws_types.cell(row=2, column=t1_col, value="Option 1")
-    ws_types.cell(row=3, column=t1_col, value="non mandatory")
+    ws_types.cell(row=3, column=t1_col, value="non mandatory")  # only row3 is marked
     ws_types.cell(row=4, column=t1_col, value="string")
 
     ws_types.cell(row=1, column=t2_col, value="Option 2")
     ws_types.cell(row=2, column=t2_col, value="Option 2")
-    ws_types.cell(row=3, column=t2_col, value="non mandatory")
+    ws_types.cell(row=3, column=t2_col, value="non mandatory")  # only row3 is marked
     ws_types.cell(row=4, column=t2_col, value="string")
 
     # Unique values from Option1 and Option2 into Types (starting row 5)
