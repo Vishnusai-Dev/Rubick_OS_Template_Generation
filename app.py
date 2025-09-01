@@ -122,9 +122,10 @@ def process_file(input_file, mode: str, mapping_df: pd.DataFrame | None = None):
     option2_data = pd.Series(dtype=str)
 
     for col in src_df.columns:
-        if "size" in norm(col):
+        col_norm = norm(col)
+        if "size" in col_norm:
             option1_data = pd.concat([option1_data, src_df[col].astype(str)], ignore_index=True)
-        if "color" in norm(col) or "colour" in norm(col):
+        if "color" in col_norm or "colour" in col_norm:
             option2_data = pd.concat([option2_data, src_df[col].astype(str)], ignore_index=True)
 
     # STRICT MATCH VALIDATION (blank if no match)
