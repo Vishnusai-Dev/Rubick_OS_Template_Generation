@@ -39,7 +39,6 @@ IMAGE_KEYWORDS = {
 }
 
 def is_image_column(col_header_norm: str, series: pd.Series) -> bool:
-    """True if header has an image keyword OR ≥30 % of first 20 non-blank values look like image files/URLs."""
     header_hit = any(k in col_header_norm for k in IMAGE_KEYWORDS)
     sample = series.dropna().astype(str).head(20)
     ratio  = sample.str.contains(IMAGE_EXT_RE).mean() if not sample.empty else 0.0
@@ -48,10 +47,8 @@ def is_image_column(col_header_norm: str, series: pd.Series) -> bool:
 
 @st.cache_data
 def load_mapping():
-    """Return (mapping_df, client_names) with tolerant sheet / header names."""
     xl = pd.ExcelFile(MAPPING_PATH)
 
-    # mapping sheet
     map_sheet = next((s for s in xl.sheet_names if MAPPING_SHEET_KEY in norm(s)),
                      xl.sheet_names[0])
     mapping_df = xl.parse(map_sheet)
@@ -59,7 +56,6 @@ def load_mapping():
                       inplace=True)
     mapping_df["__attr_key"] = mapping_df[ATTR_KEY].apply(norm)
 
-    # client sheet
     client_names = []
     client_sheet = next((s for s in xl.sheet_names if CLIENT_SHEET_KEY in norm(s)),
                         None)
@@ -73,7 +69,6 @@ def load_mapping():
     return mapping_df, client_names
 
 def process_file(input_file, mode: str, mapping_df: pd.DataFrame | None = None):
-    """Generate the filled template and return it as BytesIO."""
     src_df = pd.read_excel(input_file)
     columns_meta = []
 
@@ -112,29 +107,26 @@ def process_file(input_file, mode: str, mapping_df: pd.DataFrame | None = None):
                                  "row3": "mandatory", "row4": dtype})
 
     # ────────── ADD OPTION 1 & OPTION 2 ──────────
-    size_values = ["XS","S","M","L","XL","XXL","2XL","3XL","XXXL"]
-    color_values = [
-        "Red","White","Green","Blue","Yellow","Black","Brown",
-        "Orange","Purple","Pink","Grey","Gray","Beige","Maroon","Navy"
-    ]
+    size_values = {"XS","S","M","L","XL","XXL","2XL","3XL","XXXL"}
+    color_values = {
+        "RED","WHITE","GREEN","BLUE","YELLOW","BLACK","BROWN",
+        "ORANGE","PURPLE","PINK","GREY","GRAY","BEIGE","MAROON","NAVY"
+    }
 
-    option1_data = pd.Series(dtype=str)
-    option2_data = pd.Series(dtype=str)
+    def exact_match(val, valid_set):
+        if pd.isna(val):
+            return ""
+        s = str(val).strip().upper()
+        return s if s in valid_set else ""
+
+    option1_data = pd.Series([""]*len(src_df), dtype=str)
+    option2_data = pd.Series([""]*len(src_df), dtype=str)
 
     for col in src_df.columns:
-        col_norm = norm(col)
-        if "size" in col_norm:
-            option1_data = pd.concat([option1_data, src_df[col].astype(str)], ignore_index=True)
-        if "color" in col_norm or "colour" in col_norm:
-            option2_data = pd.concat([option2_data, src_df[col].astype(str)], ignore_index=True)
-
-    # STRICT MATCH VALIDATION (blank if no match)
-    def strict_validate(value, valid_list):
-        v = str(value).strip()
-        return v if v in valid_list else ""
-
-    option1_data = option1_data.apply(lambda x: strict_validate(x, size_values))
-    option2_data = option2_data.apply(lambda x: strict_validate(x, color_values))
+        if "size" in norm(col):
+            option1_data = src_df[col].apply(lambda x: exact_match(x, size_values))
+        if "color" in norm(col) or "colour" in norm(col):
+            option2_data = src_df[col].apply(lambda x: exact_match(x, color_values))
 
     # ────────── BUILD THE WORKBOOK ──────────
     wb        = openpyxl.load_workbook(TEMPLATE_PATH)
@@ -171,9 +163,9 @@ def process_file(input_file, mode: str, mapping_df: pd.DataFrame | None = None):
     ws_vals.cell(row=1, column=opt2_col, value="Option 2")
 
     for i, v in enumerate(option1_data.tolist(), start=2):
-        ws_vals.cell(row=i, column=opt1_col, value=v if v.strip() else None)
+        ws_vals.cell(row=i, column=opt1_col, value=v if v else None)
     for i, v in enumerate(option2_data.tolist(), start=2):
-        ws_vals.cell(row=i, column=opt2_col, value=v if v.strip() else None)
+        ws_vals.cell(row=i, column=opt2_col, value=v if v else None)
 
     # ────────── APPEND OPTION 1 & OPTION 2 TO TYPES ──────────
     t1_col = opt1_col + 2
@@ -181,17 +173,16 @@ def process_file(input_file, mode: str, mapping_df: pd.DataFrame | None = None):
 
     ws_types.cell(row=1, column=t1_col, value="Option 1")
     ws_types.cell(row=2, column=t1_col, value="Option 1")
-    ws_types.cell(row=3, column=t1_col, value="non mandatory")  # only row3 is marked
+    ws_types.cell(row=3, column=t1_col, value="non mandatory")
     ws_types.cell(row=4, column=t1_col, value="string")
 
     ws_types.cell(row=1, column=t2_col, value="Option 2")
     ws_types.cell(row=2, column=t2_col, value="Option 2")
-    ws_types.cell(row=3, column=t2_col, value="non mandatory")  # only row3 is marked
+    ws_types.cell(row=3, column=t2_col, value="non mandatory")
     ws_types.cell(row=4, column=t2_col, value="string")
 
-    # Unique values from Option1 and Option2 into Types (starting row 5)
-    unique_opt1 = pd.Series(option1_data.dropna().unique())
-    unique_opt2 = pd.Series(option2_data.dropna().unique())
+    unique_opt1 = pd.Series([x for x in option1_data.unique() if x])
+    unique_opt2 = pd.Series([x for x in option2_data.unique() if x])
 
     for i, v in enumerate(unique_opt1.tolist(), start=5):
         ws_types.cell(row=i, column=t1_col, value=v)
