@@ -91,7 +91,6 @@ def process_file(input_file, mode: str, mapping_df: pd.DataFrame | None = None):
             col_key = norm(col)
             matches = mapping_df[mapping_df["__attr_key"] == col_key]
 
-            # keep the original column
             if not matches.empty:
                 row3 = matches.iloc[0][MAND_KEY]
                 row4 = matches.iloc[0][TYPE_KEY]
@@ -100,7 +99,6 @@ def process_file(input_file, mode: str, mapping_df: pd.DataFrame | None = None):
 
             columns_meta.append({"src": col, "out": col, "row3": row3, "row4": row4})
 
-            # duplicates flagged “yes”
             for _, row in matches.iterrows():
                 if str(row[DUP_KEY]).lower().startswith("yes"):
                     new_header = row[TARGET_KEY] if pd.notna(row[TARGET_KEY]) else col
@@ -121,36 +119,96 @@ def process_file(input_file, mode: str, mapping_df: pd.DataFrame | None = None):
             columns_meta.append({"src": col, "out": col,
                                  "row3": "mandatory", "row4": dtype})
 
+    # ────────── ADD OPTION 1 & OPTION 2 ──────────
+    size_values = ["xs", "s", "m", "l", "xl", "xxl", "2xl", "3xl", "xxxl"]
+    color_values = [
+        "red","white","green","blue","yellow","black","brown",
+        "orange","purple","pink","grey","gray","beige","maroon","navy"
+    ]
+
+    def detect_size(colname, series):
+        if "size" in norm(colname):
+            return True
+        sample = series.dropna().astype(str).head(20).str.lower()
+        return sample.apply(lambda x: any(sz in x for sz in size_values)).any()
+
+    def detect_color(colname, series):
+        if "color" in norm(colname) or "colour" in norm(colname):
+            return True
+        sample = series.dropna().astype(str).head(20).str.lower()
+        return sample.apply(lambda x: any(clr in x for clr in color_values)).any()
+
+    # Extract Option1/Option2 data
+    option1_data = pd.Series(dtype=str)
+    option2_data = pd.Series(dtype=str)
+
+    for col in src_df.columns:
+        if detect_size(col, src_df[col]):
+            option1_data = pd.concat([option1_data, src_df[col].astype(str)], ignore_index=True)
+        if detect_color(col, src_df[col]):
+            option2_data = pd.concat([option2_data, src_df[col].astype(str)], ignore_index=True)
+
     # ────────── BUILD THE WORKBOOK ──────────
     wb        = openpyxl.load_workbook(TEMPLATE_PATH)
     ws_vals   = wb["Values"]
     ws_types  = wb["Types"]
 
+    # Write main mapped/auto-mapped columns to Values and Types
     for j, meta in enumerate(columns_meta, start=1):
         header_display = clean_header(meta["out"])
-
-        # Values sheet (starts at column 1)
         ws_vals.cell(row=1, column=j, value=header_display)
 
         for i, v in enumerate(src_df[meta["src"]].tolist(), start=2):
             cell = ws_vals.cell(row=i, column=j)
-
             if pd.isna(v):
                 cell.value = None
                 continue
-
             if str(meta["row4"]).lower() in ("string", "imageurlarray"):
                 cell.value = str(v)
                 cell.number_format = "@"
             else:
                 cell.value = v
 
-        # Types sheet (leave first two template columns intact)
         tcol = j + 2
         ws_types.cell(row=1, column=tcol, value=header_display)
         ws_types.cell(row=2, column=tcol, value=header_display)
         ws_types.cell(row=3, column=tcol, value=meta["row3"])
         ws_types.cell(row=4, column=tcol, value=meta["row4"])
+
+    # ────────── APPEND OPTION 1 & OPTION 2 TO VALUES ──────────
+    opt1_col = len(columns_meta) + 1
+    opt2_col = len(columns_meta) + 2
+
+    ws_vals.cell(row=1, column=opt1_col, value="Option 1")
+    ws_vals.cell(row=1, column=opt2_col, value="Option 2")
+
+    for i, v in enumerate(option1_data.tolist(), start=2):
+        ws_vals.cell(row=i, column=opt1_col, value=v if v.strip() else None)
+    for i, v in enumerate(option2_data.tolist(), start=2):
+        ws_vals.cell(row=i, column=opt2_col, value=v if v.strip() else None)
+
+    # ────────── APPEND OPTION 1 & OPTION 2 TO TYPES ──────────
+    t1_col = opt1_col + 2
+    t2_col = opt2_col + 2
+
+    ws_types.cell(row=1, column=t1_col, value="Option 1")
+    ws_types.cell(row=2, column=t1_col, value="Option 1")
+    ws_types.cell(row=3, column=t1_col, value="non mandatory")
+    ws_types.cell(row=4, column=t1_col, value="string")
+
+    ws_types.cell(row=1, column=t2_col, value="Option 2")
+    ws_types.cell(row=2, column=t2_col, value="Option 2")
+    ws_types.cell(row=3, column=t2_col, value="non mandatory")
+    ws_types.cell(row=4, column=t2_col, value="string")
+
+    # Unique values from Option1 and Option2 into Types (starting row 5)
+    unique_opt1 = pd.Series(option1_data.dropna().unique())
+    unique_opt2 = pd.Series(option2_data.dropna().unique())
+
+    for i, v in enumerate(unique_opt1.tolist(), start=5):
+        ws_types.cell(row=i, column=t1_col, value=v)
+    for i, v in enumerate(unique_opt2.tolist(), start=5):
+        ws_types.cell(row=i, column=t2_col, value=v)
 
     buf = BytesIO()
     wb.save(buf)
