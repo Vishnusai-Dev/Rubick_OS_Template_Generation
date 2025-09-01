@@ -20,7 +20,6 @@ MAPPING_SHEET_KEY = "mapping"
 CLIENT_SHEET_KEY  = "mappedclientname"
 # ──────────────────────────────────────────────────────────────
 
-
 # ╭───────────────── NORMALISERS & HELPERS ─────────────────╮
 def norm(s) -> str:
     """Trim, remove *all* whitespace, lower-case."""
@@ -28,11 +27,9 @@ def norm(s) -> str:
         return ""
     return "".join(str(s).split()).lower()
 
-
 def clean_header(header: str) -> str:
     """Replace each '.' with a single space and trim."""
     return header.replace(".", " ").strip()
-
 
 # image detection helpers
 IMAGE_EXT_RE = re.compile(r"(?i)\.(jpe?g|png|gif|bmp|webp|tiff?)$")
@@ -42,16 +39,12 @@ IMAGE_KEYWORDS = {
 }
 
 def is_image_column(col_header_norm: str, series: pd.Series) -> bool:
-    """
-    True if header has an image keyword OR ≥30 % of first 20 non-blank values
-    look like image files/URLs.
-    """
+    """True if header has an image keyword OR ≥30 % of first 20 non-blank values look like image files/URLs."""
     header_hit = any(k in col_header_norm for k in IMAGE_KEYWORDS)
     sample = series.dropna().astype(str).head(20)
     ratio  = sample.str.contains(IMAGE_EXT_RE).mean() if not sample.empty else 0.0
     return header_hit or ratio >= 0.30
 # ╰───────────────────────────────────────────────────────────╯
-
 
 @st.cache_data
 def load_mapping():
@@ -78,7 +71,6 @@ def load_mapping():
         ]
 
     return mapping_df, client_names
-
 
 def process_file(input_file, mode: str, mapping_df: pd.DataFrame | None = None):
     """Generate the filled template and return it as BytesIO."""
@@ -120,33 +112,31 @@ def process_file(input_file, mode: str, mapping_df: pd.DataFrame | None = None):
                                  "row3": "mandatory", "row4": dtype})
 
     # ────────── ADD OPTION 1 & OPTION 2 ──────────
-    size_values = ["xs", "s", "m", "l", "xl", "xxl", "2xl", "3xl", "xxxl"]
+    size_values = ["XS","S","M","L","XL","XXL","2XL","3XL","XXXL"]
     color_values = [
-        "red","white","green","blue","yellow","black","brown",
-        "orange","purple","pink","grey","gray","beige","maroon","navy"
+        "Red","White","Green","Blue","Yellow","Black","Brown",
+        "Orange","Purple","Pink","Grey","Gray","Beige","Maroon","Navy"
     ]
-
-    def detect_size(colname, series):
-        if "size" in norm(colname):
-            return True
-        sample = series.dropna().astype(str).head(20).str.lower()
-        return sample.apply(lambda x: any(sz in x for sz in size_values)).any()
-
-    def detect_color(colname, series):
-        if "color" in norm(colname) or "colour" in norm(colname):
-            return True
-        sample = series.dropna().astype(str).head(20).str.lower()
-        return sample.apply(lambda x: any(clr in x for clr in color_values)).any()
 
     # Extract Option1/Option2 data
     option1_data = pd.Series(dtype=str)
     option2_data = pd.Series(dtype=str)
 
     for col in src_df.columns:
-        if detect_size(col, src_df[col]):
+        # append all detected size columns
+        if "size" in norm(col):
             option1_data = pd.concat([option1_data, src_df[col].astype(str)], ignore_index=True)
-        if detect_color(col, src_df[col]):
+        # append all detected color columns
+        if "color" in norm(col) or "colour" in norm(col):
             option2_data = pd.concat([option2_data, src_df[col].astype(str)], ignore_index=True)
+
+    # STRICT MATCH VALIDATION
+    def strict_validate(value, valid_list):
+        v = str(value).strip()
+        return v if v in valid_list else "non mandatory"
+
+    option1_data = option1_data.apply(lambda x: strict_validate(x, size_values))
+    option2_data = option2_data.apply(lambda x: strict_validate(x, color_values))
 
     # ────────── BUILD THE WORKBOOK ──────────
     wb        = openpyxl.load_workbook(TEMPLATE_PATH)
@@ -214,7 +204,6 @@ def process_file(input_file, mode: str, mapping_df: pd.DataFrame | None = None):
     wb.save(buf)
     buf.seek(0)
     return buf
-
 
 # ───────────────────────── STREAMLIT UI ─────────────────────────
 st.set_page_config(page_title="SKU Template Automation", layout="wide")
