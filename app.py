@@ -59,6 +59,10 @@ def load_mapping():
 
 def process_file(input_file, mode: str, mapping_df: pd.DataFrame | None = None):
     src_df = pd.read_excel(input_file)
+
+    # ────────── DROP COMPLETELY EMPTY COLUMNS ──────────
+    src_df.dropna(axis=1, how='all', inplace=True)
+
     columns_meta = []
 
     # ────────── BUILD columns_meta ──────────
