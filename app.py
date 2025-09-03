@@ -156,11 +156,11 @@ def process_file(input_file, mode: str, mapping_df: pd.DataFrame | None = None):
     ws_types.cell(row=1, column=t1_col, value="Option 1")
     ws_types.cell(row=2, column=t1_col, value="Option 1")
     ws_types.cell(row=3, column=t1_col, value="non mandatory")
-    ws_types.cell(row=4, column=t1_col, value="string")
+    ws_types.cell(row=4, column=t1_col, value="select")
     ws_types.cell(row=1, column=t2_col, value="Option 2")
     ws_types.cell(row=2, column=t2_col, value="Option 2")
     ws_types.cell(row=3, column=t2_col, value="non mandatory")
-    ws_types.cell(row=4, column=t2_col, value="string")
+    ws_types.cell(row=4, column=t2_col, value="select")
     unique_opt1 = pd.Series([x for x in option1_data.unique() if x])
     unique_opt2 = pd.Series([x for x in option2_data.unique() if x])
     for i, v in enumerate(unique_opt1.tolist(), start=5):
