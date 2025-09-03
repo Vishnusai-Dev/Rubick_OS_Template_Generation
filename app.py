@@ -58,9 +58,9 @@ def load_mapping():
 
 def read_input_excel(input_file, template_type: str):
     """Read Excel with rules depending on template_type.
-       If this template comes from one of the listed marketplaces, select the right type from the dropdown.
+       Supports XLSX, XLSM, and XLS formats.
     """
-    xl = pd.ExcelFile(input_file)
+    xl = pd.ExcelFile(input_file)  # pandas auto-detects type
 
     if template_type == "Amazon":
         if "Template" not in xl.sheet_names:
@@ -195,7 +195,7 @@ else:
 
 mode          = st.selectbox("Select Mode", ["Mapping", "Auto-Mapping"])
 template_type = st.selectbox("Select Type of Input", ["General","Amazon","Flipkart","Myntra","Ajio","TataCliq"])
-input_file    = st.file_uploader("Upload Input Excel File", type=["xlsx"])
+input_file    = st.file_uploader("Upload Input Excel File", type=["xlsx", "xls", "xlsm"])
 
 if input_file:
     with st.spinner("Processing…"):
