@@ -18,7 +18,6 @@ DUP_KEY    = "duplicatestobecreated"
 # substrings used to find worksheets
 MAPPING_SHEET_KEY = "mapping"
 CLIENT_SHEET_KEY  = "mappedclientname"
-# ──────────────────────────────────────────────────────────────
 
 # ╭───────────────── NORMALISERS & HELPERS ─────────────────╮
 def norm(s) -> str:
@@ -57,15 +56,49 @@ def load_mapping():
 
     return mapping_df, client_names
 
-def process_file(input_file, mode: str, mapping_df: pd.DataFrame | None = None):
-    src_df = pd.read_excel(input_file)
+def read_input_excel(input_file, template_type: str):
+    """Read Excel with rules depending on template_type.
+       If this template comes from one of the listed marketplaces, select the right type from the dropdown.
+    """
+    xl = pd.ExcelFile(input_file)
 
-    # ────────── DROP COMPLETELY EMPTY COLUMNS ──────────
-    src_df.dropna(axis=1, how='all', inplace=True)
+    if template_type == "Amazon":
+        if "Template" not in xl.sheet_names:
+            st.warning("❌ 'Template' sheet not found in file.")
+            return None
+        df = xl.parse("Template", header=1, skiprows=[0,1])  
+    elif template_type == "Flipkart":
+        if len(xl.sheet_names) < 3:
+            st.warning("❌ Flipkart template requires at least 3 sheets.")
+            return None
+        df = xl.parse(xl.sheet_names[2], header=0, skiprows=[1,2,3,4])  
+    elif template_type == "Myntra":
+        if len(xl.sheet_names) < 2:
+            st.warning("❌ Myntra template requires at least 2 sheets.")
+            return None
+        df = xl.parse(xl.sheet_names[1], header=2)  
+    elif template_type == "Ajio":
+        if len(xl.sheet_names) < 3:
+            st.warning("❌ Ajio template requires at least 3 sheets.")
+            return None
+        df = xl.parse(xl.sheet_names[2], header=1)  
+    elif template_type == "TataCliq":
+        if len(xl.sheet_names) < 1:
+            st.warning("❌ TataCliq template requires at least 1 sheet.")
+            return None
+        df = xl.parse(xl.sheet_names[0], header=3)  
+    else:  # General
+        df = xl.parse(xl.sheet_names[0], header=0)  
+
+    return df
+
+def process_file(input_file, mode: str, template_type: str, mapping_df: pd.DataFrame | None = None):
+    src_df = read_input_excel(input_file, template_type)
+    if src_df is None:
+        return None  # stop processing if invalid sheet
 
     columns_meta = []
 
-    # ────────── BUILD columns_meta ──────────
     if mode == "Mapping" and mapping_df is not None:
         for col in src_df.columns:
             col_key = norm(col)
@@ -86,41 +119,20 @@ def process_file(input_file, mode: str, mapping_df: pd.DataFrame | None = None):
                             "row3": row[MAND_KEY],
                             "row4": row[TYPE_KEY]
                         })
-    else:  # Auto-Mapping
+    else:  
         for col in src_df.columns:
             dtype = "imageurlarray" if is_image_column(norm(col), src_df[col]) else "string"
             columns_meta.append({"src": col, "out": col, "row3": "mandatory", "row4": dtype})
 
-    # ────────── ADD OPTION 1 & OPTION 2 ──────────
-    size_values = {"XS","S","M","L","XL","XXL","2XL","3XL","XXXL"}
-    color_values = {
-        "RED","WHITE","GREEN","BLUE","YELLOW","BLACK","BROWN",
-        "ORANGE","PURPLE","PINK","GREY","GRAY","BEIGE","MAROON","NAVY"
-    }
-    def exact_match(val, valid_set):
-        if pd.isna(val):
-            return ""
-        s = str(val).strip().upper()
-        return s if s in valid_set else ""
+    size_col = next((c for c in src_df.columns if "size" in norm(c)), None)
+    color_col = next((c for c in src_df.columns if ("color" in norm(c) or "colour" in norm(c))), None)
+    option1_data = src_df[size_col] if size_col else pd.Series([""]*len(src_df))
+    option2_data = src_df[color_col] if color_col else pd.Series([""]*len(src_df))
 
-    option1_data = pd.Series([""]*len(src_df), dtype=str)
-    option2_data = pd.Series([""]*len(src_df), dtype=str)
-
-    # collect matches from ALL size/color columns without overwriting
-    for col in src_df.columns:
-        if "size" in norm(col):
-            temp = src_df[col].apply(lambda x: exact_match(x, size_values))
-            option1_data = option1_data.mask(option1_data=="", temp)
-        if "color" in norm(col) or "colour" in norm(col):
-            temp = src_df[col].apply(lambda x: exact_match(x, color_values))
-            option2_data = option2_data.mask(option2_data=="", temp)
-
-    # ────────── BUILD THE WORKBOOK ──────────
     wb        = openpyxl.load_workbook(TEMPLATE_PATH)
     ws_vals   = wb["Values"]
     ws_types  = wb["Types"]
 
-    # Write main mapped/auto-mapped columns to Values and Types
     for j, meta in enumerate(columns_meta, start=1):
         header_display = clean_header(meta["out"])
         ws_vals.cell(row=1, column=j, value=header_display)
@@ -140,17 +152,15 @@ def process_file(input_file, mode: str, mapping_df: pd.DataFrame | None = None):
         ws_types.cell(row=3, column=tcol, value=meta["row3"])
         ws_types.cell(row=4, column=tcol, value=meta["row4"])
 
-    # ────────── APPEND OPTION 1 & OPTION 2 TO VALUES ──────────
     opt1_col = len(columns_meta) + 1
     opt2_col = len(columns_meta) + 2
     ws_vals.cell(row=1, column=opt1_col, value="Option 1")
     ws_vals.cell(row=1, column=opt2_col, value="Option 2")
     for i, v in enumerate(option1_data.tolist(), start=2):
-        ws_vals.cell(row=i, column=opt1_col, value=v if v else None)
+        ws_vals.cell(row=i, column=opt1_col, value=v if pd.notna(v) and v != "" else None)
     for i, v in enumerate(option2_data.tolist(), start=2):
-        ws_vals.cell(row=i, column=opt2_col, value=v if v else None)
+        ws_vals.cell(row=i, column=opt2_col, value=v if pd.notna(v) and v != "" else None)
 
-    # ────────── APPEND OPTION 1 & OPTION 2 TO TYPES ──────────
     t1_col = opt1_col + 2
     t2_col = opt2_col + 2
     ws_types.cell(row=1, column=t1_col, value="Option 1")
@@ -161,8 +171,8 @@ def process_file(input_file, mode: str, mapping_df: pd.DataFrame | None = None):
     ws_types.cell(row=2, column=t2_col, value="Option 2")
     ws_types.cell(row=3, column=t2_col, value="non mandatory")
     ws_types.cell(row=4, column=t2_col, value="string")
-    unique_opt1 = pd.Series([x for x in option1_data.unique() if x])
-    unique_opt2 = pd.Series([x for x in option2_data.unique() if x])
+    unique_opt1 = pd.Series([str(x) for x in option1_data.dropna().unique() if str(x).strip()])
+    unique_opt2 = pd.Series([str(x) for x in option2_data.dropna().unique() if str(x).strip()])
     for i, v in enumerate(unique_opt1.tolist(), start=5):
         ws_types.cell(row=i, column=t1_col, value=v)
     for i, v in enumerate(unique_opt2.tolist(), start=5):
@@ -183,18 +193,23 @@ if client_names:
 else:
     st.warning("⚠️  No client list found in the mapping workbook.")
 
-mode       = st.selectbox("Select Mode", ["Mapping", "Auto-Mapping"])
-input_file = st.file_uploader("Upload Input Excel File", type=["xlsx"])
-if input_file and st.button(f"Generate Output ({mode})"):
+mode          = st.selectbox("Select Mode", ["Mapping", "Auto-Mapping"])
+template_type = st.selectbox("Select Type of Input", ["General","Amazon","Flipkart","Myntra","Ajio","TataCliq"])
+input_file    = st.file_uploader("Upload Input Excel File", type=["xlsx"])
+
+if input_file:
     with st.spinner("Processing…"):
-        result = process_file(input_file, mode, mapping_df if mode == "Mapping" else None)
-        st.success("✅ Output Generated!")
-        st.download_button(
-            "📥 Download Output",
-            data=result,
-            file_name="output_template.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        result = process_file(input_file, mode, template_type, mapping_df if mode == "Mapping" else None)
+        if result:
+            st.success("✅ Output Generated!")
+            st.download_button(
+                "📥 Download Output",
+                data=result,
+                file_name="output_template.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        else:
+            st.error("Processing failed. Please check the warnings above.")
 
 st.markdown("---")
 st.caption("Built for Rubick.ai | By Vishnu Sai")
